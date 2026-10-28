@@ -47,7 +47,10 @@ h1{font-family:var(--f-display);font-weight:600;font-size:26px;margin:0;line-hei
 .field{display:flex;flex-direction:column;gap:4px;min-width:0}
 .field label,.flabel{font-size:12px;text-transform:uppercase;letter-spacing:.06em;color:var(--muted);font-weight:700}
 .hint{font-size:12px;color:var(--muted);text-transform:none;letter-spacing:0;font-weight:400}
-select{font:inherit;font-size:16px;padding:10px;border-radius:8px;border:1px solid var(--line);background:var(--bg);color:var(--fg);width:100%;min-width:0}
+select{font:inherit;font-size:14px;padding:8px 10px;border-radius:8px;border:1px solid var(--line);background:var(--bg);color:var(--fg);width:100%;min-width:0}
+.sel{display:flex;gap:6px;align-items:stretch}
+.mapbtn{flex:none;width:38px;border:1px solid var(--line);background:var(--accent-soft);border-radius:8px;font-size:16px;cursor:pointer;text-decoration:none;display:flex;align-items:center;justify-content:center}
+.mapbtn[aria-disabled="true"]{opacity:.4;pointer-events:none}
 #swap{grid-row:1 / span 2;grid-column:2;align-self:center;width:44px;height:44px;border-radius:50%;
   border:1px solid var(--line);background:var(--accent-soft);color:var(--accent);font-size:20px;cursor:pointer}
 .lines{display:flex;flex-direction:column;gap:6px}
@@ -147,9 +150,9 @@ footer p{margin:0}
   </div>
 
   <div class="picker">
-    <div class="field"><label for="from">Partenza <span class="hint" id="fromHint"></span></label><select id="from"></select></div>
+    <div class="field"><label for="from">Partenza <span class="hint" id="fromHint"></span></label><div class="sel"><select id="from"></select><a class="mapbtn" id="fromMap" target="_blank" rel="noopener" aria-label="Apri la partenza su Google Maps" title="Apri la partenza su Google Maps">📍</a></div></div>
     <button id="swap" type="button" aria-label="Inverti partenza e arrivo">⇅</button>
-    <div class="field"><label for="to">Arrivo</label><select id="to"></select></div>
+    <div class="field"><label for="to">Arrivo</label><div class="sel"><select id="to"></select><a class="mapbtn" id="toMap" target="_blank" rel="noopener" aria-label="Apri l'arrivo su Google Maps" title="Apri l'arrivo su Google Maps">📍</a></div></div>
   </div>
 
   <div class="opts col">
@@ -504,19 +507,31 @@ function nearestValid(){
   for(const o of fromSel.options){if(!o.value) continue;const d=dFromMe(o.value);if(d!=null&&(!best||d<best.d)) best={k:o.value,d}}
   return best;
 }
-let lastOrder="";
+let selOpen=false;
+for(const s of [fromSel,toSel]){
+  s.addEventListener("focus",()=>{selOpen=true});
+  s.addEventListener("pointerdown",()=>{selOpen=true});
+  s.addEventListener("blur",()=>{selOpen=false;if($("useLoc").checked&&pos) refreshSelects()});
+  s.addEventListener("change",()=>{selOpen=false});
+}
+function mapsUrl(k){
+  const c=C(k);
+  return "https://www.google.com/maps/search/?api=1&query="+(c?c[0]+","+c[1]:encodeURIComponent(S[k][0]+", "+S[k][1].split(" · ")[0]+", Italia"));
+}
+function updateMaps(){
+  for(const [id,k] of [["fromMap",fromVal],["toMap",toVal]]){
+    const a=$(id); a.setAttribute("aria-disabled",String(!k)); if(k) a.href=mapsUrl(k); else a.removeAttribute("href");
+  }
+}
 function afterLoc(){
   const on=$("useLoc").checked;
   $("sortDist").disabled=!on; $("sortLbl").classList.toggle("dis",!on);
   // prima opzione: alla prima posizione valida imposta la partenza sulla fermata utile più vicina
-  if(on&&pos&&!autoPicked&&!userPickedFrom){
+  if(on&&pos&&!autoPicked&&!userPickedFrom&&!selOpen){
     const n=nearestValid(); autoPicked=true;
     if(n&&n.k!==fromVal){fromVal=n.k;refreshSelects();render()}
   }
-  if(on&&pos&&$("sortDist").checked&&document.activeElement!==fromSel){
-    const ord=[...fromSel.options].map(o=>o.value).join();
-    refreshSelects(); if([...fromSel.options].map(o=>o.value).join()!==ord) lastOrder=ord;
-  }
+  if(on&&pos&&!selOpen) refreshSelects();
   renderLoc(); renderRide();
 }
 function renderLoc(){
@@ -535,13 +550,16 @@ function renderLoc(){
 
 function servedBy(lines){const s=new Set();for(const tr of TRIPS) if(lines.includes(tr.line)) tr.stops.forEach((k,i)=>{if(tr.t[i]!=null)s.add(k)});return s}
 
+const showDist=()=>$("useLoc").checked&&!!pos;
+const dLbl=k=>{const d=showDist()?dFromMe(k):null;return S[k][0]+(d!=null?" ("+fmtD(d)+")":"")};
 function fillSelect(sel,allowed,value,placeholder,byDist){
-  sel.innerHTML="";
+  const keep=sel.cloneNode(false);
+  const old=sel; sel=keep;
   if(placeholder){const o=new Option(placeholder,"");o.disabled=true;sel.appendChild(o)}
   if(byDist){
     const g=document.createElement("optgroup");g.label="Per distanza da te";
     allowed.map(k=>[k,dFromMe(k)]).sort((a,b)=>(a[1]??1e9)-(b[1]??1e9)||S[a[0]][0].localeCompare(S[b[0]][0],"it"))
-      .forEach(([k,d])=>g.appendChild(new Option(S[k][0]+(d!=null?" — "+fmtD(d):""),k)));
+      .forEach(([k,d])=>g.appendChild(new Option(dLbl(k),k)));
     sel.appendChild(g);
   }else{
     const groups={};
@@ -549,11 +567,14 @@ function fillSelect(sel,allowed,value,placeholder,byDist){
     for(const a of AREAS){
       if(!groups[a]) continue;
       const g=document.createElement("optgroup");g.label=a;
-      groups[a].sort((x,y)=>x[1].localeCompare(y[1],"it")).forEach(([k,n])=>g.appendChild(new Option(n,k)));
+      groups[a].sort((x,y)=>x[1].localeCompare(y[1],"it")).forEach(([k])=>g.appendChild(new Option(dLbl(k),k)));
       sel.appendChild(g);
     }
   }
   sel.value=allowed.includes(value)?value:"";
+  // non ricostruire se nulla è cambiato: evita di chiudere la tendina aperta
+  if(old.innerHTML!==sel.innerHTML) old.innerHTML=sel.innerHTML;
+  old.value=sel.value;
 }
 
 function renderChips(){
@@ -581,6 +602,7 @@ function refreshSelects(){
   fillSelect(fromSel,valid,fromVal,valid.length?"Scegli la partenza":"Nessuna partenza utile",byDist);
   $("fromHint").textContent=`· ${valid.length} con corse per l'arrivo scelto`;
   if(!valid.includes(fromVal)) fromVal="";
+  updateMaps();
 }
 
 function nowInfo(){const d=new Date();return{min:d.getHours()*60+d.getMinutes(),dow:d.getDay(),sec:d.getHours()*3600+d.getMinutes()*60+d.getSeconds()}}
@@ -661,9 +683,10 @@ function renderRide(){
     if(x>0&&s.id!==seq[x-1].id) tl+=`<div class="sep">Capolinea · corsa ${s.id}</div>`;
     tl+=`<div class="${cls}"><span class="t">${fmt(s.t)}</span><span class="dot"></span><span><span class="nm">${st[0]}</span>${st[2]?'<span class="req">a richiesta</span>':""}${x===cur?'<span class="here">prossima</span>':""}</span></div>`;
   });
+  const wasOpen=!!box.querySelector("details[open]");
   box.innerHTML=`<div class="ride-top"><span class="ttl">In viaggio · ${badge(r.line)} corsa ${r.ids.join(" / ")}</span><button type="button" id="endRide">Termina</button></div>
     ${head}<div class="ride-src">${src}</div>
-    <details><summary>Percorso con fermate passate</summary><div class="seg" data-l="${r.line}" style="padding-top:8px">${tl}</div></details>`;
+    <details${wasOpen?" open":""}><summary>Percorso con fermate passate</summary><div class="seg" data-l="${r.line}" style="padding-top:8px">${tl}</div></details>`;
   box.hidden=false;
   $("endRide").onclick=endRide;
 }
@@ -711,11 +734,9 @@ function render(){
     div.querySelector(".ride-btn").addEventListener("click",()=>{startRide(r);render()});
     list.appendChild(div);
   }
-  const nx=list.querySelector(".trip.next");
-  if(nx&&!hide&&!ride) nx.scrollIntoView({block:"nearest"});
 }
 function refresh(){refreshSelects();render()}
-fromSel.addEventListener("change",()=>{fromVal=fromSel.value;userPickedFrom=true;render();renderLoc()});
+fromSel.addEventListener("change",()=>{fromVal=fromSel.value;userPickedFrom=true;updateMaps();render();renderLoc()});
 toSel.addEventListener("change",()=>{toVal=toSel.value;refresh();renderLoc()});
 $("hidePast").addEventListener("change",render);
 $("useLoc").addEventListener("change",()=>{
