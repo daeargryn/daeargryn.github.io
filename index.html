@@ -37,6 +37,8 @@ h1{font-family:var(--f-display);font-weight:700;font-size:34px;line-height:1.05;
 .ico svg{width:28px;height:28px}
 .tool b{display:block;font-family:var(--f-display);font-size:22px;font-weight:700;line-height:1.1}
 .tool span{font-size:13px;color:var(--muted)}
+.warn{margin:0;font-size:13px;color:var(--muted);border-left:3px solid var(--line);padding:2px 0 2px 10px}
+.warn b{color:var(--fg)}
 footer{font-size:12px;color:var(--muted)}
 </style>
 </head>
@@ -59,7 +61,9 @@ footer{font-size:12px;color:var(--muted)}
     </a>
   </nav>
 
-  <footer>Uso personale.</footer>
+  <p class="warn" role="note"><b>Attenzione:</b> i dati (orari, fermate, posizioni) sono ricavati automaticamente da fonti pubbliche e possono essere incompleti, non aggiornati o errati. Verifica sempre con le fonti ufficiali.</p>
+
+  <footer>Uso personale · Powered by Claude AI</footer>
 </div>
 <script>
 try{document.getElementById("today").textContent=new Date().toLocaleDateString("it-IT",{weekday:"long",day:"numeric",month:"long"}).replace(/^./,c=>c.toUpperCase())}catch(e){}

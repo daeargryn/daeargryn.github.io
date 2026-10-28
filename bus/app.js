@@ -116,9 +116,33 @@ function renderChips(){
   }
 }
 
+/* ---------- calendario: giorno e periodo ---------- */
+const todayFest=()=>{const d=new Date();return d.getDay()===0||isHoliday(d)};
+function renderCal(){
+  const groups=[["dayChips","fest",[[false,"Feriale"],[true,"Festivo"]],todayFest()],
+                ["perChips","est",[[false,"Universitario"],[true,"Estivo"]],null]];
+  for(const [id,key,opts,today] of groups){
+    const box=$(id);box.innerHTML="";
+    for(const [v,label] of opts){
+      const b=document.createElement("button");b.type="button";b.className="chip";b.setAttribute("role","radio");
+      b.setAttribute("aria-checked",String(CAL[key]===v));
+      b.innerHTML=label+(today===v?' <span class="n">oggi</span>':"");
+      // le corse festive valgono tutto l'anno: il periodo non conta
+      if(key==="est"&&CAL.fest) b.disabled=true;
+      b.addEventListener("click",()=>{CAL[key]=v;renderCal();refresh()});
+      box.appendChild(b);
+    }
+  }
+}
+
 function refreshSelects(){
   const lines=activeLines();
   const served=[...servedBy(lines)];
+  if(!served.length){
+    // nessuna corsa nel calendario scelto: lascia le scelte dell'utente com'erano
+    for(const s of [toSel,fromSel]){s.innerHTML="";const o=new Option("Nessun servizio","");o.disabled=true;s.appendChild(o);s.value=""}
+    $("fromHint").textContent="";updateMaps();return;
+  }
   if(!served.includes(toVal)) toVal=served.includes("volta")?"volta":served[0];
   fillSelect(toSel,served,toVal);
   // partenze valide: solo le fermate da cui almeno una corsa porta all'arrivo scelto
@@ -223,19 +247,29 @@ function render(){
   const lines=activeLines(), o=fromVal, d=toVal, hide=$("hidePast").checked;
   saveState();
   const list=$("list"),notice=$("notice");list.innerHTML="";
-  const {min,dow}=nowInfo(), sunday=dow===0, saturday=dow===6;
-  notice.hidden=!sunday; if(sunday) notice.textContent="Oggi è domenica: queste linee non effettuano servizio. Gli orari valgono da lunedì a sabato.";
+  const {min,dow}=nowInfo(), saturday=dow===6;
+  // "oggi" solo se il giorno scelto (feriale/festivo) è quello di oggi: altrimenti niente corse passate/prossima
+  const today=CAL.fest===todayFest();
+  const msgs=[];
+  if(!today) msgs.push(`Stai guardando gli orari ${CAL.fest?"festivi":"feriali"}: oggi è un giorno ${CAL.fest?"feriale":"festivo"}.`);
+  const nameL=ls=>(ls.length>1?"le linee ":"la linea ")+ls.join(" e ");
+  if(CAL.fest){const no=lines.filter(l=>!TRIPS.some(tr=>tr.line===l&&tr.fest));
+    if(no.length) msgs.push(`Nei giorni festivi ${nameL(no)} non ${no.length>1?"effettuano":"effettua"} servizio.`)}
+  else if(CAL.est){const no=lines.filter(l=>!ESTLINES.has(l));
+    if(no.length&&ESTLINES.size) msgs.push(`Orario estivo disponibile solo per ${nameL([...ESTLINES])}: per ${no.join(" e ")} è mostrato l'orario normale.`)}
+  notice.hidden=!msgs.length; notice.textContent=msgs.join(" ");
   document.querySelectorAll("[data-n]").forEach(el=>{const l=el.dataset.n;el.textContent=o&&d?String(dedupe(legs(o,d,[l])).length):""});
+  if(!servedBy(lines).size){$("count").textContent="";list.innerHTML=`<p class="empty">Nessuna corsa delle linee scelte in questo calendario.</p>`;return}
   if(!o){$("count").textContent="";list.innerHTML=`<p class="empty">Scegli una fermata di partenza: l'elenco mostra solo quelle con corse per ${S[d][0]}.</p>`;return}
   let res=dedupe(legs(o,d,lines)).sort((a,b)=>a.dep-b.dep||a.line.localeCompare(b.line));
-  const runs=r=>!(saturday&&r.weekOnly);
-  const nextIdx=sunday?-1:res.findIndex(r=>r.dep>=min&&runs(r));
-  const shown=res.map((r,idx)=>({r,idx})).filter(x=>!(hide&&!sunday&&(x.r.dep<min||!runs(x.r))));
+  const runs=r=>!(today&&saturday&&r.weekOnly);
+  const nextIdx=today?res.findIndex(r=>r.dep>=min&&runs(r)):-1;
+  const shown=res.map((r,idx)=>({r,idx})).filter(x=>!(hide&&today&&(x.r.dep<min||!runs(x.r))));
   $("count").textContent=res.length?`${res.length} corse · ${shown.length} mostrate`:"";
   if(!shown.length){list.innerHTML=`<p class="empty">${res.length?"Nessuna altra corsa oggi tra queste fermate.":"Nessuna corsa collega queste due fermate con le linee scelte."}</p>`;return}
   for(const {r,idx} of shown){
     const div=document.createElement("div");
-    const past=!sunday&&r.dep<min, off=!runs(r), isNext=idx===nextIdx;
+    const past=today&&r.dep<min, off=!runs(r), isNext=idx===nextIdx;
     div.className="trip"+(past?" past":"")+(off?" off":"")+(isNext?" next":"");
     div.dataset.l=r.line;
     const dur=r.arr-r.dep, lastTr=r.parts[r.parts.length-1].tr;
@@ -277,7 +311,8 @@ $("swap").addEventListener("click",()=>{
 function start(){
   lineSel=LINES.includes(saved.l)?saved.l:"all";
   if(!S[fromVal]) fromVal="aut"; if(!S[toVal]) toVal="volta";
-  renderChips();refresh();
+  CAL.fest=todayFest();
+  renderChips();renderCal();refresh();
   // ripristina la corsa in corso (stesso giorno)
   try{const rs=JSON.parse(localStorage.getItem("l157ride")||"null");
     if(rs&&rs.day===new Date().toDateString()){const r=dedupe(legs(rs.o,rs.d,[rs.line])).find(x=>rideKey(x)===rs.key);if(r){ride=null;startRide(r);render()}}}catch(e){}

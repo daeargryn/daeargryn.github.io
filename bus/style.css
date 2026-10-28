@@ -49,6 +49,7 @@ select{font:inherit;font-size:14px;padding:8px 10px;border-radius:8px;border:1px
 #swap{grid-row:1 / span 2;grid-column:2;align-self:center;width:44px;height:44px;border-radius:50%;
   border:1px solid var(--line);background:var(--accent-soft);color:var(--accent);font-size:20px;cursor:pointer}
 .lines{display:flex;flex-direction:column;gap:6px}
+.cal{display:flex;gap:10px 20px;flex-wrap:wrap}
 .chips{display:flex;gap:6px;flex-wrap:wrap}
 .chip{font:inherit;font-size:15px;font-weight:700;cursor:pointer;border:1px solid var(--line);background:var(--surface);color:var(--fg);
   border-radius:99px;padding:6px 14px;display:inline-flex;gap:8px;align-items:center;min-height:40px}
