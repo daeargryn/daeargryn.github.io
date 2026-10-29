@@ -1,7 +1,7 @@
 // logica pura: dati, calcolo delle corse, formattazione (nessun accesso al DOM)
-let S={}, COORD={}, LINES=[], AREAS=[], TRIPS=[];
+let S={}, COORD={}, POLES={}, LINES=[], AREAS=[], TRIPS=[];
 function loadData(d){
-  S=d.stops; COORD=d.coords||{}; LINES=d.lines; AREAS=d.areas;
+  S=d.stops; COORD=d.coords||{}; POLES=d.poles||{}; LINES=d.lines; AREAS=d.areas;
   TRIPS=d.trips.map(([line,id,dir,flags,start,seq])=>{
     const stops=[],t=[];
     for(const p of seq.split(" ")){const [k,o]=p.split(":");stops.push(k);t.push(o===undefined?null:start+ +o)}
@@ -29,6 +29,8 @@ function isHoliday(d){
 // distanza in metri (haversine)
 function dist(a,b){const R=6371000,r=Math.PI/180,dLa=(b[0]-a[0])*r,dLo=(b[1]-a[1])*r;
   const h=Math.sin(dLa/2)**2+Math.cos(a[0]*r)*Math.cos(b[0]*r)*Math.sin(dLo/2)**2;return 2*R*Math.asin(Math.sqrt(h))}
+// palina usata dalla corsa: alcune fermate hanno pali diversi per linea/direzione (da GTFS Regione Calabria)
+const CP=(k,tr)=>POLES[k+"|"+tr.line+"|"+tr.dir]||COORD[k]||null;
 const fmtD=m=>m<1000?Math.round(m/10)*10+" m":(m/1000).toFixed(1).replace(".",",")+" km";
 
 const fmt=m=>String(Math.floor(m/60)).padStart(2,"0")+":"+String(m%60).padStart(2,"0");

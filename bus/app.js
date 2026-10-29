@@ -10,11 +10,16 @@ $("useLoc").checked=saved.u!==false;      // posizione attiva per default, disat
 $("sortDist").checked=!!saved.sd;
 const activeLines=()=>lineSel==="all"?LINES:[lineSel];
 const C=k=>COORD[k]||null;
+// pali di partenza verso l'arrivo scelto (calcolati in refreshSelects): la stessa fermata può avere pali diversi per direzione
+let DEP={};
+const poles=k=>DEP[k]||(C(k)?[C(k)]:[]);
 
 /* ---------- posizione ---------- */
 let pos=null, watchId=null, locErr="", autoPicked=false, userPickedFrom=false;
 const posFresh=()=>pos&&Date.now()-pos.ts<90000;
-const dFromMe=k=>{const c=C(k);return pos&&c?dist([pos.lat,pos.lon],c):null};
+const nearPole=k=>{const ps=poles(k);if(!pos) return ps[0]||null;
+  let best=null,bd=Infinity;for(const c of ps){const d=dist([pos.lat,pos.lon],c);if(d<bd){bd=d;best=c}}return best};
+const dFromMe=k=>{const c=pos&&nearPole(k);return c?dist([pos.lat,pos.lon],c):null};
 function startLoc(){
   locErr="";
   if(!("geolocation" in navigator)){locErr="Questo browser non fornisce la posizione.";$("useLoc").checked=false;afterLoc();return}
@@ -40,13 +45,15 @@ for(const s of [fromSel,toSel]){
   s.addEventListener("blur",()=>{selOpen=false;if($("useLoc").checked&&pos) refreshSelects()});
   s.addEventListener("change",()=>{selOpen=false});
 }
-function mapsUrl(k){
-  const c=C(k);
+function mapsUrl(k,c=C(k)){
   return "https://www.google.com/maps/search/?api=1&query="+(c?c[0]+","+c[1]:encodeURIComponent(S[k][0]+", "+S[k][1].split(" · ")[0]+", Italia"));
 }
 function updateMaps(){
-  for(const [id,k] of [["fromMap",fromVal],["toMap",toVal]]){
-    const a=$(id); a.setAttribute("aria-disabled",String(!k)); if(k) a.href=mapsUrl(k); else a.removeAttribute("href");
+  // arrivo: palo usato dalla prima corsa trovata; partenza: palo più vicino a te tra quelli delle corse utili
+  const r=fromVal&&toVal?legs(fromVal,toVal,activeLines())[0]:null;
+  const toC=r?CP(toVal,r.parts[r.parts.length-1].tr):C(toVal);
+  for(const [id,k,c] of [["fromMap",fromVal,fromVal&&nearPole(fromVal)],["toMap",toVal,toC]]){
+    const a=$(id); a.setAttribute("aria-disabled",String(!k)); if(k) a.href=mapsUrl(k,c||undefined); else a.removeAttribute("href");
   }
 }
 function afterLoc(){
@@ -138,15 +145,21 @@ function renderCal(){
 function refreshSelects(){
   const lines=activeLines();
   const served=[...servedBy(lines)];
+  DEP={};
   if(!served.length){
     // nessuna corsa nel calendario scelto: lascia le scelte dell'utente com'erano
     for(const s of [toSel,fromSel]){s.innerHTML="";const o=new Option("Nessun servizio","");o.disabled=true;s.appendChild(o);s.value=""}
     $("fromHint").textContent="";updateMaps();return;
   }
   if(!served.includes(toVal)) toVal=served.includes("volta")?"volta":served[0];
-  fillSelect(toSel,served,toVal);
   // partenze valide: solo le fermate da cui almeno una corsa porta all'arrivo scelto
-  const valid=served.filter(k=>k!==toVal&&legs(k,toVal,lines).length);
+  const valid=served.filter(k=>{
+    if(k===toVal) return false;
+    const r=legs(k,toVal,lines);
+    if(r.length) DEP[k]=[...new Set(r.map(x=>CP(k,x.parts[0].tr)).filter(Boolean))];
+    return r.length>0;
+  });
+  fillSelect(toSel,served,toVal);
   const byDist=$("useLoc").checked&&$("sortDist").checked&&!!pos;
   fillSelect(fromSel,valid,fromVal,valid.length?"Scegli la partenza":"Nessuna partenza utile",byDist);
   $("fromHint").textContent=`· ${valid.length} con corse per l'arrivo scelto`;
@@ -182,7 +195,7 @@ let ride=null; // {r, seq:[{k,t,line,id}], cur, at}
 const rideKey=r=>[r.line,r.parts.map(p=>p.tr.id+"@"+p.i+"-"+p.j).join("+")].join("|");
 function startRide(r){
   const seq=[];
-  r.parts.forEach((p,pi)=>{for(let k=p.i;k<=p.j;k++){if(pi>0&&k===p.i) continue;if(p.tr.t[k]==null) continue;seq.push({k:p.tr.stops[k],t:p.tr.t[k],line:p.tr.line,id:p.tr.id})}});
+  r.parts.forEach((p,pi)=>{for(let k=p.i;k<=p.j;k++){if(pi>0&&k===p.i) continue;if(p.tr.t[k]==null) continue;seq.push({k:p.tr.stops[k],t:p.tr.t[k],line:p.tr.line,id:p.tr.id,c:CP(p.tr.stops[k],p.tr)})}});
   ride={r,seq,cur:0,at:-1,src:"orario"};
   try{localStorage.setItem("l157ride",JSON.stringify({key:rideKey(r),day:new Date().toDateString(),o:fromVal,d:toVal,line:r.line}))}catch(e){}
   renderRide(); window.scrollTo({top:0,behavior:"smooth"});
@@ -191,15 +204,15 @@ function endRide(){ride=null;try{localStorage.removeItem("l157ride")}catch(e){}r
 function updateRide(){
   if(!ride) return;
   const seq=ride.seq, n=seq.length, {sec}=nowInfo(), nowM=sec/60;
-  const gps=$("useLoc").checked&&posFresh()&&pos.acc<=150&&seq.every(s=>C(s.k));
+  const gps=$("useLoc").checked&&posFresh()&&pos.acc<=150&&seq.every(s=>s.c);
   if(gps){
     // fermate candidate: da quella appena passata in avanti, senza saltare troppo (evita i giri che ripassano negli stessi punti)
     const me=[pos.lat,pos.lon], lo=Math.max(0,ride.cur-1), hi=Math.min(n-1,ride.cur+6);
     let bi=lo,bd=Infinity;
-    for(let x=lo;x<=hi;x++){const d=dist(me,C(seq[x].k));if(d<bd){bd=d;bi=x}}
+    for(let x=lo;x<=hi;x++){const d=dist(me,seq[x].c);if(d<bd){bd=d;bi=x}}
     let next,at=-1;
     if(bd<=60){at=bi;next=bi+1}
-    else if(bi<n-1&&dist(me,C(seq[bi+1].k))<dist(C(seq[bi].k),C(seq[bi+1].k))) next=bi+1; // già oltre bi, verso bi+1
+    else if(bi<n-1&&dist(me,seq[bi+1].c)<dist(seq[bi].c,seq[bi+1].c)) next=bi+1; // già oltre bi, verso bi+1
     else next=bi;
     ride.cur=Math.max(ride.cur,Math.min(next,n)); ride.at=at; ride.src="gps"; ride.dist=bd;
   }else{
